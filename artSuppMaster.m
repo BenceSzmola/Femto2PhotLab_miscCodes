@@ -165,12 +165,12 @@ end
 switch bssType
     case {'CCA','ICA'}
         %% use CCA or ICA
+        
+        % create the IC discarding figure if ICA is selected
         if strcmp(bssType,'ICA')
-            figObj = figure('Name','Discarding ICs',...
-                'NumberTitle','off',...
-                'WindowState','maximized',...
-                'Visible','off');
+            [fig,spH,dbH] = makeICdiscardFig(numChans);
         end
+        
         switch decompType
             case {'EEMD','SWT'}
                 for compNum = 1:numComps % numComps was defined back at flagging stage
@@ -187,7 +187,10 @@ switch bssType
                             reconstr = doCCAdiscard(currCompSegs,autoCorrThr,autoCorrLagNum);
                         elseif strcmp(bssType,'ICA')
                             segtAxis = tAxis(segInds);
-                            reconstr = doICAdiscard(currCompSegs,decompType,compNum,segNum,size(segments,1),segtAxis,figObj);
+                            [reconstr,skip] = doICAdiscard(currCompSegs,decompType,compNum,segNum,size(segments,1),segtAxis,fig,spH,dbH);
+                            if skip
+                                break
+                            end
                         end
                         
                         currCompsCl(:,segInds) = reconstr;
@@ -217,7 +220,10 @@ switch bssType
                             reconstr = doCCAdiscard(currCompSegs,autoCorrThr,autoCorrLagNum);
                         elseif strcmp(bssType,'ICA')
                             segtAxis = tAxis(segInds);
-                            reconstr = doICAdiscard(currCompSegs,decompType,compNum,segNum,size(segments,1),segtAxis,figObj);
+                            [reconstr,skip] = doICAdiscard(currCompSegs,decompType,compNum,segNum,size(segments,1),segtAxis,fig,spH,dbH);
+                            if skip
+                                break
+                            end
                         end
                         
                         currCompsCl(:,segInds) = reconstr;
@@ -229,8 +235,8 @@ switch bssType
                 end
                 
         end
-        if ishandle(figObj)
-            delete(figObj)
+        if ishandle(fig)
+            delete(fig)
         end
     otherwise
         %% dont use BSS
@@ -410,31 +416,111 @@ function reconstr = doCCAdiscard(inputMat,discardThr,lagNum)
 
 end
 
-function reconstr = doICAdiscard(inputMat,decompType,compNum,segNum,numSegs,segtAxis,figObj)
+function [reconstr,skip] = doICAdiscard(inputMat,decompType,compNum,segNum,numSegs,segtAxis,fig,spH,dbH)
 % computing ICA and then asking the user to choose which ICs they want to discard
-    clf(figObj)
-    numChans = size(inputMat,1);
     [ICs,A,W] = fastica(inputMat);
-    numICs = size(ICs,1);
-    for j = 1:numChans
-        subplot(numChans,2,(2*j-1),'Parent',figObj)
-        plot(segtAxis,inputMat(j,:))
-        title(sprintf('Ch #%d - %s comp. #%d, flagged segment #%d/%d',j,decompType,compNum,segNum,numSegs))
-        if j <= numICs
-            subplot(numChans,2,2*j,'Parent',figObj)
-            plot(segtAxis,ICs(j,:))
-            title(sprintf('Extracted IC #%d',j))
+    
+    % calling the function which fills in the plots into the discarding figure
+    plot2discardICfig(spH,dbH,inputMat,ICs,decompType,compNum,segNum,numSegs,segtAxis)
+    % reveal the discarding figure
+    fig.Visible = 'on';
+    % halt execution until the user is interacting with the figure, they can resume from the figure
+    uiwait
+    % extract the selections from the figure, then reset the figure's values
+    ICs2discard = fig.UserData.ICs2discard;
+    fig.UserData.ICs2discard = false(size(inputMat,1));
+    % check whether the user selected the option to skip current component
+    skip = fig.UserData.skip;
+    fig.UserData.skip = false;
+    
+    % discard selected ICs, then reconstruct using mixing matrix
+    ICs(ICs2discard,:) = 0;
+    reconstr = A*ICs;
+end
+
+function [fig,spH,dbH] = makeICdiscardFig(numChans)
+    UD.ICs2discard = false(numChans,1);
+    UD.skip = false;
+    fig = figure('Name','Discarding ICs',...
+                'NumberTitle','off',...
+                'WindowState','maximized',...
+                'Visible','off',...
+                'UserData',UD);
+            
+    dbH = gobjects(numChans,1);
+    for i = 1:numChans
+        subplot(numChans,2,(2*i-1),'Parent',fig)
+        sp = subplot(numChans,2,2*i,'Parent',fig);
+        pos = sp.Position;
+        db = uicontrol(fig,'Style','pushbutton',...
+                'Units','normalized',...
+                'Position',[pos(1)+pos(3)+0.01, pos(2)+pos(4)/4, 0.05, 0.05],...
+                'String','Keep',...
+                'BackgroundColor','g',...
+                'Callback',@discardCB,...
+                'Tag',num2str(i));
+        dbH(i) = db;
+    end
+    
+    spH = findobj(fig,'Type','axes');
+    spH(1:length(spH)) = spH(length(spH):-1:1);
+    
+    uicontrol(fig,'Style','pushbutton',...
+        'Units','normalized',...
+        'Position',[0.4, 0.01, 0.05, 0.05],...
+        'String','Continue',...
+        'Callback',@carryOn);
+    uicontrol(fig,'Style','pushbutton',...
+        'Units','normalized',...
+        'Position',[0.55, 0.01, 0.05, 0.05],...
+        'String','Skip comp.',...
+        'Callback',@skipComp);
+    
+    function discardCB(h,~)
+        icNum = str2double(h.Tag);
+        if fig.UserData.ICs2discard(icNum)
+            fig.UserData.ICs2discard(icNum) = false;
+            h.BackgroundColor = 'g';
+            h.String = 'Keep';
+        else
+            fig.UserData.ICs2discard(icNum) = true;
+            h.BackgroundColor = 'r';
+            h.String = 'Discard';
         end
     end
-    figObj.Visible = 'on';
-    [IC2discard,tf] = listdlg('PromptString','Select ICs to discard:','ListString',num2str((1:size(ICs,1))'));
-    if ~tf
-        errordlg('Algorithm stopped')
-        return
+
+    function skipComp(~,~)
+        fig.UserData.skip = true;
+        carryOn
     end
-    figObj.Visible = 'off';
-    ICs(IC2discard,:) = 0;
-    reconstr = A*ICs;
+
+    function carryOn(~,~)
+        fig.Visible = 'off';
+        [dbH.String] = deal('Keep');
+        [dbH.BackgroundColor] = deal('g');
+        [dbH.Visible] = deal('on');
+        [spH.Visible] = deal('on');
+        
+        for spNum = 1:2*numChans
+            cla(spH(spNum))
+        end
+        uiresume
+    end
+end
+
+function plot2discardICfig(spH,dbH,inputMat,ICs,decompType,compNum,segNum,numSegs,segtAxis)
+    numICs = size(ICs,1);
+    for j = 1:size(inputMat,1)
+        plot(spH(2*j-1),segtAxis,inputMat(j,:))
+        title(spH(2*j-1),sprintf('Ch #%d - %s comp. #%d, flagged segment #%d/%d',j,decompType,compNum,segNum,numSegs))
+        if j <= numICs
+            plot(spH(2*j),segtAxis,ICs(j,:))
+            title(spH(2*j),sprintf('Extracted IC #%d',j))
+        else
+            spH(2*j).Visible = 'off';
+            dbH(j).Visible = 'off';
+        end
+    end
 end
 
 function plotBefAft(tAxis,fs,data,dataCl,spectro,decompType,flagType,bssType)
