@@ -12,14 +12,16 @@ if nargin == 0 || ~isstruct(inputStruct)
     output.tAxis = [];
     output.fs = [];
     output.data_perio = [];
-    output.doPeriodFilt = [];
-    output.decompType = [];
-    output.flagType = [];
-    output.bssType = [];
-    output.slideWinSize = [];
-    output.iecThr = [];
-    output.autoCorrThr = [];
-    output.autoCorrLagNum = [];
+    output.doPeriodFilt = false;
+    output.decompType = 'SWT';
+    output.flagType = 'IEC';
+    output.bssType = '';
+    output.slideWinSize = 2000;
+    output.iecThr = 0.8;
+    output.autoCorrThr = 0.99;
+    output.autoCorrLagNum = 10;
+    output.doRawPlot = false;
+    output.doSpectroPlot = false;
     
     return
 else
@@ -36,6 +38,8 @@ else
     iecThr = inputStruct.iecThr;
     autoCorrThr = inputStruct.autoCorrThr;
     autoCorrLagNum = inputStruct.autoCorrLagNum;
+    doRawPlot = inputStruct.doRawPlot;
+    doSpectroPlot = inputStruct.doSpectroPlot;
 end
 
 %% handling the input data
@@ -78,7 +82,7 @@ switch decompType
             [C,L] = wavedec(data(chan,:),decLvl,wname);
             details = detcoef(C,L,1:decLvl);
             approx = appcoef(C,L,wname);
-            compCell(chan,:) = [details, mat2cell(approx,ones(numChans,1))];
+            compCell(chan,:) = [details, mat2cell(approx,ones(1,1))];
         end
         
     case 'SWT'
@@ -159,8 +163,14 @@ if strcmp(flagType,'autoCorr') && ~strcmp(bssType,'')
 end
 
 switch bssType
-    case 'CCA'
-        %% use CCA
+    case {'CCA','ICA'}
+        %% use CCA or ICA
+        if strcmp(bssType,'ICA')
+            figObj = figure('Name','Discarding ICs',...
+                'NumberTitle','off',...
+                'WindowState','maximized',...
+                'Visible','off');
+        end
         switch decompType
             case {'EEMD','SWT'}
                 for compNum = 1:numComps % numComps was defined back at flagging stage
@@ -171,12 +181,20 @@ switch bssType
                     for segNum = 1:size(segments,1)
                         segInds = segments(segNum,1):segments(segNum,2);
                         currCompSegs = currComps(:,segInds);
-                        reconstr = doCCAdiscard(currCompSegs,autoCorrThr,autoCorrLagNum);
+                        
+                        % apply either CCA or ICA
+                        if strcmp(bssType,'CCA')
+                            reconstr = doCCAdiscard(currCompSegs,autoCorrThr,autoCorrLagNum);
+                        elseif strcmp(bssType,'ICA')
+                            segtAxis = tAxis(segInds);
+                            reconstr = doICAdiscard(currCompSegs,decompType,compNum,segNum,size(segments,1),segtAxis,figObj);
+                        end
+                        
                         currCompsCl(:,segInds) = reconstr;
                     end
                     
                     for chan = 1:numChans
-                        compCellClean{chan}(compNum,:) = currCompsCl;
+                        compCellClean{chan}(compNum,:) = currCompsCl(chan,:);
                     end
                 end
                 
@@ -194,19 +212,26 @@ switch bssType
                     for segNum = 1:size(segments,1)
                         segInds = segments(segNum,1):segments(segNum,2);
                         currCompSegs = currComps(:,segInds);
-                        reconstr = doCCAdiscard(currCompSegs,autoCorrThr,autoCorrLagNum);
+                        
+                        if strcmp(bssType,'CCA')
+                            reconstr = doCCAdiscard(currCompSegs,autoCorrThr,autoCorrLagNum);
+                        elseif strcmp(bssType,'ICA')
+                            segtAxis = tAxis(segInds);
+                            reconstr = doICAdiscard(currCompSegs,decompType,compNum,segNum,size(segments,1),segtAxis,figObj);
+                        end
+                        
                         currCompsCl(:,segInds) = reconstr;
                     end
                     
                     for chan = 1:numChans
-                        compCellClean{chan,compNum} = currCompsCl;
+                        compCellClean{chan,compNum} = currCompsCl(chan,:);
                     end
                 end
                 
         end
-    case 'ICA'
-        %% use ICA
-        
+        if ishandle(figObj)
+            delete(figObj)
+        end
     otherwise
         %% dont use BSS
         for chan = 1:numChans
@@ -264,11 +289,11 @@ switch decompType
         % reconstructing vector c for dwt function
         for chan = 1:numChans
             cClean = zeros(1,sum(L(1:end-1)));
-            for i = 1:length(L)-1
+            for i = 1:decLvl+1
                 if i == 1
                     cClean(1:L(1)) = compCellClean{chan,decLvl+1};
                 else
-                    cClean(sum(L(1:i-1))+1:sum(L(chan,1:i))) = compCellClean{chan,length(L)-i};
+                    cClean(sum(L(1:i-1))+1:sum(L(1:i))) = compCellClean{chan,length(L)-i};
                 end
             end
             dataCleaned(chan,:) = waverec(cClean,L,wname);
@@ -276,7 +301,12 @@ switch decompType
         
 end
 
-plotBefAft(tAxis,fs,data,dataCleaned,false,decompType,flagType,bssType)
+if doRawPlot
+    plotBefAft(tAxis,fs,data,dataCleaned,false,decompType,flagType,bssType)
+end
+if doSpectroPlot
+    plotBefAft(tAxis,fs,data,dataCleaned,true,decompType,flagType,bssType)
+end
 
 output = dataCleaned;
 % end of main function
@@ -311,6 +341,7 @@ function IEC = compWiseIEC_dwt(compCell,numComps,slideWinSize)
         currComps = cell2mat(compCell(:,compNum));
         
         currCompsLen = size(currComps,2);
+        IEC{compNum} = zeros(1,currCompsLen);
         
         if compNum < numComps
             slideWinSizeComp = round(slideWinSize / (2^compNum));
@@ -366,6 +397,9 @@ end
 
 function reconstr = doCCAdiscard(inputMat,discardThr,lagNum)
     % compute CCA, discard sources with the autocorrelations lower than threshold
+    if size(inputMat,2) <= lagNum
+        lagNum = 1;
+    end
     xDelay = [zeros(size(inputMat,1),lagNum), inputMat(:,1:end-lagNum)];
     [A,~,r,U,~,~] = canoncorr(inputMat',xDelay');
     sources2discard = r < discardThr;
@@ -376,7 +410,37 @@ function reconstr = doCCAdiscard(inputMat,discardThr,lagNum)
 
 end
 
+function reconstr = doICAdiscard(inputMat,decompType,compNum,segNum,numSegs,segtAxis,figObj)
+% computing ICA and then asking the user to choose which ICs they want to discard
+    clf(figObj)
+    numChans = size(inputMat,1);
+    [ICs,A,W] = fastica(inputMat);
+    numICs = size(ICs,1);
+    for j = 1:numChans
+        subplot(numChans,2,(2*j-1),'Parent',figObj)
+        plot(segtAxis,inputMat(j,:))
+        title(sprintf('Ch #%d - %s comp. #%d, flagged segment #%d/%d',j,decompType,compNum,segNum,numSegs))
+        if j <= numICs
+            subplot(numChans,2,2*j,'Parent',figObj)
+            plot(segtAxis,ICs(j,:))
+            title(sprintf('Extracted IC #%d',j))
+        end
+    end
+    figObj.Visible = 'on';
+    [IC2discard,tf] = listdlg('PromptString','Select ICs to discard:','ListString',num2str((1:size(ICs,1))'));
+    if ~tf
+        errordlg('Algorithm stopped')
+        return
+    end
+    figObj.Visible = 'off';
+    ICs(IC2discard,:) = 0;
+    reconstr = A*ICs;
+end
+
 function plotBefAft(tAxis,fs,data,dataCl,spectro,decompType,flagType,bssType)
+    if strcmp(bssType,'')
+        bssType = 'No BSS';
+    end
     for chan = 1:size(data,1)
         if ~spectro
             figure('Name',sprintf('Channel #%d - Before and after cleaning',chan));
@@ -398,6 +462,7 @@ function plotBefAft(tAxis,fs,data,dataCl,spectro,decompType,flagType,bssType)
             [cfs,f] = cwt(data(chan,:),'amor',fs,'FrequencyLimits',[1,1000]);
             subplot(211)
             imagesc('XData',tAxis,'YData',f,'CData',abs(cfs))
+            axis tight
             title(sprintf('Ch#%d CWT - Raw',chan))
             xlabel('Time [s]')
             ylabel('Frequency [Hz]')
@@ -408,6 +473,7 @@ function plotBefAft(tAxis,fs,data,dataCl,spectro,decompType,flagType,bssType)
             [cfs,f] = cwt(dataCl(chan,:),'amor',fs,'FrequencyLimits',[1,1000]);
             subplot(212)
             imagesc('XData',tAxis,'YData',f,'CData',abs(cfs))
+            axis tight
             title(sprintf('Ch#%d CWT - %s, %s, %s',chan,decompType,flagType,bssType))
             xlabel('Time [s]')
             ylabel('Frequency [Hz]')
