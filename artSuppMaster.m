@@ -235,9 +235,11 @@ switch bssType
                 end
                 
         end
-        if ishandle(fig)
+        
+        if strcmp(bssType,'ICA') && ishandle(fig)
             delete(fig)
         end
+        
     otherwise
         %% dont use BSS
         for chan = 1:numChans
