@@ -560,7 +560,7 @@ function plotBefAft(tAxis,fs,data,dataCl,spectro,decompType,flagType,bssType)
             ylabel('Frequency [Hz]')
             c = colorbar;
             c.Label.String = 'CWT coeff. magnitude';
-            clear cfs f ax
+            clear cfs f sp1
             
             [cfs,f] = cwt(dataCl(chan,:),'amor',fs,'FrequencyLimits',[1,500]);
             sp2 = subplot(212);
@@ -573,7 +573,7 @@ function plotBefAft(tAxis,fs,data,dataCl,spectro,decompType,flagType,bssType)
             ylabel('Frequency [Hz]')
             c = colorbar;
             c.Label.String = 'CWT coeff. magnitude';
-            clear cfs f ax
+            clear cfs f sp2
         end
         linkaxes(findobj(gcf,'Type','axes'),'xy')
     end
