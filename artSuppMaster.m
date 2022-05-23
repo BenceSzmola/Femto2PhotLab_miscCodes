@@ -533,7 +533,7 @@ function plotBefAft(tAxis,fs,data,dataCl,spectro,decompType,flagType,bssType)
     end
     for chan = 1:size(data,1)
         if ~spectro
-            figure('Name',sprintf('Channel #%d - Before and after cleaning',chan));
+            figure('Name',sprintf('Channel #%d - Before and after cleaning',chan),'WindowState','maximized');
             subplot(211)
             plot(tAxis,data(chan,:))
             title(sprintf('Ch#%d - Raw',chan))
@@ -545,20 +545,16 @@ function plotBefAft(tAxis,fs,data,dataCl,spectro,decompType,flagType,bssType)
             title(sprintf('Ch#%d - %s, %s, %s',chan,decompType,flagType,bssType))
             xlabel('Time [s]')
             ylabel('Voltage [\muV]')
-            
-            linkaxes(findobj(gcf,'Type','axes'),'xy')
         else
-            figure('Name',sprintf('Channel #%d CWT - Before and after cleaning',chan));
-            [cfs,f] = cwt(data(chan,:),'amor',fs,'FrequencyLimits',[1,1000]);
-            subplot(211)
+            figure('Name',sprintf('Channel #%d CWT - Before and after cleaning',chan),...
+                'WindowState','maximized',...
+                'SizeChangedFcn',@updateSpectroLabels);
+            [cfs,f] = cwt(data(chan,:),'amor',fs,'FrequencyLimits',[1,500]);
+            sp1 = subplot(211);
             imagesc(tAxis,log2(f),abs(cfs))
             axis tight
-            ax = gca;
-            ax.YDir = 'normal';
-            oldYTicks = ax.YTick;
-            newYTicks = 2.^oldYTicks;
-            newYtickLabs = string(num2str(newYTicks'));
-            ax.YTickLabel = newYtickLabs;
+            sp1.YDir = 'normal';
+            sp1.YTickLabel = num2str(2.^(sp1.YTick'));
             title(sprintf('Ch#%d CWT - Raw',chan))
             xlabel('Time [s]')
             ylabel('Frequency [Hz]')
@@ -567,23 +563,26 @@ function plotBefAft(tAxis,fs,data,dataCl,spectro,decompType,flagType,bssType)
             clear cfs f ax
             
             [cfs,f] = cwt(dataCl(chan,:),'amor',fs,'FrequencyLimits',[1,500]);
-            subplot(212)
+            sp2 = subplot(212);
             imagesc(tAxis,log2(f),abs(cfs))
             axis tight
-            ax = gca;
-            ax.YDir = 'normal';
-            oldYTicks = ax.YTick;
-            newYTicks = 2.^oldYTicks;
-            newYtickLabs = string(num2str(newYTicks'));
-            ax.YTickLabel = newYtickLabs;
+            sp2.YDir = 'normal';
+            sp2.YTickLabel = cellfun(@(x) num2str(x),mat2cell(2.^(sp2.YTick'),ones(1,length(sp2.YTick))),'UniformOutput',false);
             title(sprintf('Ch#%d CWT - %s, %s, %s',chan,decompType,flagType,bssType))
             xlabel('Time [s]')
             ylabel('Frequency [Hz]')
             c = colorbar;
             c.Label.String = 'CWT coeff. magnitude';
             clear cfs f ax
-            
-            linkaxes(findobj(gcf,'Type','axes'),'x')
+        end
+        linkaxes(findobj(gcf,'Type','axes'),'xy')
+    end
+    
+    function updateSpectroLabels(h,~)
+        sps = findobj(h,'Type','axes');
+        for i = 1:length(sps)
+            sps(i).YTickLabel = cellfun(@(x) num2str(x),mat2cell(2.^(sps(i).YTick'),...
+                ones(1,length(sps(i).YTick))),'UniformOutput',false);
         end
     end
 end
