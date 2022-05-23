@@ -14,6 +14,7 @@ if nargin == 0 || ~isstruct(inputStruct)
     output.data_perio = [];
     output.doPeriodFilt = false;
     output.decompType = 'SWT';
+    output.freqLow = 4;
     output.flagType = 'IEC';
     output.bssType = '';
     output.slideWinSize = 2000;
@@ -32,6 +33,7 @@ else
     data_perio = inputStruct.data_perio;
     doPeriodFilt = inputStruct.doPeriodFilt;
     decompType = inputStruct.decompType;
+    freqLow = inputStruct.freqLow;
     flagType = inputStruct.flagType;
     bssType = inputStruct.bssType;
     slideWinSize = inputStruct.slideWinSize;
@@ -75,7 +77,7 @@ switch decompType
         
         %% compute DWT decomposition
         wname = 'db4';
-        freqLow = 4;
+%         freqLow = 4;
         decLvl = round(log2(fs/freqLow));
         compCell = cell(numChans,decLvl+1);
         for chan = 1:numChans
@@ -88,10 +90,10 @@ switch decompType
     case 'SWT'
         %% compute SWT decomposition
         wname = 'db4';
-        freqLow = 4;
+%         freqLow = 4;
         decLvl = round(log2(fs/freqLow));
         padLen = numSamples/(2^decLvl);
-        padLen = (2^decLvl)*round(padLen) - numSamples;
+        padLen = (2^decLvl)*ceil(padLen) - numSamples;
         dataPad = [data, zeros(numChans,padLen)];
         compCell = cell(numChans,1);
         for chan = 1:numChans
@@ -549,25 +551,37 @@ function plotBefAft(tAxis,fs,data,dataCl,spectro,decompType,flagType,bssType)
             figure('Name',sprintf('Channel #%d CWT - Before and after cleaning',chan));
             [cfs,f] = cwt(data(chan,:),'amor',fs,'FrequencyLimits',[1,1000]);
             subplot(211)
-            imagesc('XData',tAxis,'YData',f,'CData',abs(cfs))
+            imagesc(tAxis,log2(f),abs(cfs))
             axis tight
+            ax = gca;
+            ax.YDir = 'normal';
+            oldYTicks = ax.YTick;
+            newYTicks = 2.^oldYTicks;
+            newYtickLabs = string(num2str(newYTicks'));
+            ax.YTickLabel = newYtickLabs;
             title(sprintf('Ch#%d CWT - Raw',chan))
             xlabel('Time [s]')
             ylabel('Frequency [Hz]')
             c = colorbar;
             c.Label.String = 'CWT coeff. magnitude';
-            clear cfs f
+            clear cfs f ax
             
-            [cfs,f] = cwt(dataCl(chan,:),'amor',fs,'FrequencyLimits',[1,1000]);
+            [cfs,f] = cwt(dataCl(chan,:),'amor',fs,'FrequencyLimits',[1,500]);
             subplot(212)
-            imagesc('XData',tAxis,'YData',f,'CData',abs(cfs))
+            imagesc(tAxis,log2(f),abs(cfs))
             axis tight
+            ax = gca;
+            ax.YDir = 'normal';
+            oldYTicks = ax.YTick;
+            newYTicks = 2.^oldYTicks;
+            newYtickLabs = string(num2str(newYTicks'));
+            ax.YTickLabel = newYtickLabs;
             title(sprintf('Ch#%d CWT - %s, %s, %s',chan,decompType,flagType,bssType))
             xlabel('Time [s]')
             ylabel('Frequency [Hz]')
             c = colorbar;
             c.Label.String = 'CWT coeff. magnitude';
-            clear cfs f
+            clear cfs f ax
             
             linkaxes(findobj(gcf,'Type','axes'),'x')
         end
