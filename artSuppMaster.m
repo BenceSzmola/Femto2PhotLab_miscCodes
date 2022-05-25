@@ -539,17 +539,19 @@ function plotBefAft(tAxis,fs,data,dataCl,spectro,decompType,flagType,bssType)
             title(sprintf('Ch#%d - Raw',chan))
             xlabel('Time [s]')
             ylabel('Voltage [\muV]')
+            xlim([min(tAxis), max(tAxis)])
             
             subplot(212)
             plot(tAxis,dataCl(chan,:))
             title(sprintf('Ch#%d - %s, %s, %s',chan,decompType,flagType,bssType))
             xlabel('Time [s]')
             ylabel('Voltage [\muV]')
+            xlim([min(tAxis), max(tAxis)])
         else
             figure('Name',sprintf('Channel #%d CWT - Before and after cleaning',chan),...
                 'WindowState','maximized',...
                 'SizeChangedFcn',@updateSpectroLabels);
-            [cfs,f] = cwt(data(chan,:),'amor',fs,'FrequencyLimits',[1,500]);
+            [cfs,f] = cwt(data(chan,:),'amor',fs,'FrequencyLimits',[1,1000]);
             sp1 = subplot(211);
             imagesc(tAxis,log2(f),abs(cfs))
             axis tight
@@ -562,7 +564,7 @@ function plotBefAft(tAxis,fs,data,dataCl,spectro,decompType,flagType,bssType)
             c.Label.String = 'CWT coeff. magnitude';
             clear cfs f sp1
             
-            [cfs,f] = cwt(dataCl(chan,:),'amor',fs,'FrequencyLimits',[1,500]);
+            [cfs,f] = cwt(dataCl(chan,:),'amor',fs,'FrequencyLimits',[1,1000]);
             sp2 = subplot(212);
             imagesc(tAxis,log2(f),abs(cfs))
             axis tight
