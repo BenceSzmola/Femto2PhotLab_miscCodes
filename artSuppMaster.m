@@ -1,12 +1,24 @@
-function output = artSuppMaster(inputStruct)
+function varargout = artSuppMaster(varargin)
 
-% two ways to call this function:
-% inputStruct = artSuppMaster(1) this will initialize and return the input structure the function expects in
-%                                the second way to call it
-% output = artSuppMaster(inputStruct) this is the call which will then run the algorithms
+% three ways to call this function:
+% artSuppMaster(data,tAxis,fs)          call from DAS prompting creation of GUI for other settings
+% inputStruct = artSuppMaster(1)        this will initialize and return the input structure the function expects in
+%                                       the second way to call it
+% output = artSuppMaster(inputStruct)   this is the call which will then run the algorithms
 
 %% check which type of call was made
-if nargin == 0 || ~isstruct(inputStruct)
+if nargin == 3
+    initStruct = artSuppMaster(1);
+    initStruct.data = varargin{1};
+    initStruct.tAxis = varargin{2};
+    initStruct.fs = varargin{3};
+    
+    inputStruct = artSuppMaster_inputGUI(initStruct);
+    output = artSuppMaster(inputStruct);
+    algSettings = rmfield(inputStruct,{'data','tAxis','fs','data_perio'});
+    varargout = {output, algSettings};
+    return
+elseif (nargin == 1) && ~isstruct(varargin{1})
     % initialize input struct
     output.data = [];
     output.tAxis = [];
@@ -14,7 +26,7 @@ if nargin == 0 || ~isstruct(inputStruct)
     output.data_perio = [];
     output.doPeriodFilt = false;
     output.decompType = 'SWT';
-    output.freqLow = 4;
+    output.freqLow = 2;
     output.flagType = 'IEC';
     output.bssType = '';
     output.slideWinSize = 2000;
@@ -23,10 +35,11 @@ if nargin == 0 || ~isstruct(inputStruct)
     output.autoCorrLagNum = 10;
     output.doRawPlot = false;
     output.doSpectroPlot = false;
-    
+    varargout = {output};
     return
-else
+elseif (nargin == 1) && (isstruct(varargin{1}))
     % extract parameters from input
+    inputStruct = varargin{1};
     data = inputStruct.data;
     tAxis = inputStruct.tAxis;
     fs = inputStruct.fs;
@@ -318,10 +331,14 @@ if doSpectroPlot
     plotBefAft(tAxis,fs,data,dataCleaned,true,decompType,flagType,bssType)
 end
 
-output = dataCleaned;
+varargout{1} = dataCleaned;
+if nargout == 2
+    varargout{2} = inputStruct;
+end
 % end of main function
 end
 
+%%
 function IEC = compWiseIEC(compCell,numComps,slideWinSize)
     % create IEC placeholder
     numSamples = size(compCell{1},2);
@@ -343,6 +360,7 @@ function IEC = compWiseIEC(compCell,numComps,slideWinSize)
     end
 end
 
+%%
 function IEC = compWiseIEC_dwt(compCell,numComps,slideWinSize)
     % create the IECs placeholder, here a cell is needed because of the unequal lengths of components
     IEC = cell(numComps,1);
@@ -374,6 +392,7 @@ function IEC = compWiseIEC_dwt(compCell,numComps,slideWinSize)
     end
 end
 
+%%
 function compAutoCorr = slideAutoCorr(comp,slideWinSize,lagNum)
     compAutoCorr = zeros(size(comp));
     for i = 1:slideWinSize:length(comp)
@@ -388,6 +407,7 @@ function compAutoCorr = slideAutoCorr(comp,slideWinSize,lagNum)
     end
 end
 
+%%
 function segments = extractLogicSegments(inputVec,minSegLen)
     segments = [];
     % find indexes above the threshold for a given amount of time
@@ -405,6 +425,7 @@ function segments = extractLogicSegments(inputVec,minSegLen)
 
 end
 
+%%
 function reconstr = doCCAdiscard(inputMat,discardThr,lagNum)
     % compute CCA, discard sources with the autocorrelations lower than threshold
     if size(inputMat,2) <= lagNum
@@ -420,9 +441,10 @@ function reconstr = doCCAdiscard(inputMat,discardThr,lagNum)
 
 end
 
+%%
 function [reconstr,skip] = doICAdiscard(inputMat,decompType,compNum,segNum,numSegs,segtAxis,fig,spH,dbH)
 % computing ICA and then asking the user to choose which ICs they want to discard
-    [ICs,A,W] = fastica(inputMat);
+    [ICs,A,~] = fastica(inputMat);
     
     % calling the function which fills in the plots into the discarding figure
     plot2discardICfig(spH,dbH,inputMat,ICs,decompType,compNum,segNum,numSegs,segtAxis)
@@ -442,6 +464,7 @@ function [reconstr,skip] = doICAdiscard(inputMat,decompType,compNum,segNum,numSe
     reconstr = A*ICs;
 end
 
+%%
 function [fig,spH,dbH] = makeICdiscardFig(numChans)
     UD.ICs2discard = false(numChans,1);
     UD.skip = false;
@@ -512,6 +535,7 @@ function [fig,spH,dbH] = makeICdiscardFig(numChans)
     end
 end
 
+%%
 function plot2discardICfig(spH,dbH,inputMat,ICs,decompType,compNum,segNum,numSegs,segtAxis)
     numICs = size(ICs,1);
     for j = 1:size(inputMat,1)
@@ -527,6 +551,7 @@ function plot2discardICfig(spH,dbH,inputMat,ICs,decompType,compNum,segNum,numSeg
     end
 end
 
+%%
 function plotBefAft(tAxis,fs,data,dataCl,spectro,decompType,flagType,bssType)
     if strcmp(bssType,'')
         bssType = 'No BSS';
@@ -587,4 +612,111 @@ function plotBefAft(tAxis,fs,data,dataCl,spectro,decompType,flagType,bssType)
                 ones(1,length(sps(i).YTick))),'UniformOutput',false);
         end
     end
+end
+
+%%
+function inputStruct = artSuppMaster_inputGUI(inputStruct)
+    inputFig = figure('NumberTitle','off','Name','Settings for artifact suppression','Visible','off');
+    doPerioUIC = uicontrol(inputFig,...
+        'Style','checkbox',...
+        'Units','normalized',...
+        'Position',[0.01, 0.95, 0.7, 0.05],...
+        'String','Do periodic filtering');
+    decompTypeUIC = uicontrol(inputFig,...
+        'Style','popupmenu',...
+        'Units','normalized',...
+        'Position',[0.01, 0.85, 0.49, 0.05],...
+        'String',{'--Select decomposition--','EEMD','SWT','DWT'});
+    uicontrol(inputFig,...
+        'Style','text',...
+        'Units','normalized',...
+        'Position',[0.55, 0.85, 0.35, 0.05],...
+        'String','Lowest freq border');
+    freqLowUICedit = uicontrol(inputFig,...
+        'Style','edit',...
+        'Units','normalized',...
+        'Position',[0.9, 0.85, 0.09, 0.05],...
+        'String','2');
+    flagTypeUIC = uicontrol(inputFig,...
+        'Style','popupmenu',...
+        'Units','normalized',...
+        'Position',[0.01, 0.75, 0.7, 0.05],...
+        'String',{'--Select flagging method--','IEC','Autocorrelation'});
+    uicontrol(inputFig,...
+        'Style','text',...
+        'Units','normalized',...
+        'Position',[0.01, 0.65, 0.35, 0.05],...
+        'String','IEC threshold');
+    iecThrUICedit = uicontrol(inputFig,...
+        'Style','edit',...
+        'Units','normalized',...
+        'Position',[0.4, 0.65, 0.09, 0.05],...
+        'String','0.8');
+    uicontrol(inputFig,...
+        'Style','text',...
+        'Units','normalized',...
+        'Position',[0.55, 0.65, 0.35, 0.05],...
+        'String','Sliding Win Size [samples]');
+    slideWinSizeUICedit = uicontrol(inputFig,...
+        'Style','edit',...
+        'Units','normalized',...
+        'Position',[0.9, 0.65, 0.09, 0.05],...
+        'String','2000');
+    uicontrol(inputFig,...
+        'Style','text',...
+        'Units','normalized',...
+        'Position',[0.01, 0.55, 0.35, 0.05],...
+        'String','Autocorr threshold');
+    autoCorrThrUICedit = uicontrol(inputFig,...
+        'Style','edit',...
+        'Units','normalized',...
+        'Position',[0.4, 0.55, 0.09, 0.05],...
+        'String','0.99');
+    uicontrol(inputFig,...
+        'Style','text',...
+        'Units','normalized',...
+        'Position',[0.55, 0.55, 0.35, 0.05],...
+        'String','Autocorr threshold');
+    autoCorrLagNumUICedit = uicontrol(inputFig,...
+        'Style','edit',...
+        'Units','normalized',...
+        'Position',[0.9, 0.55, 0.09, 0.05],...
+        'String','10');
+    bssTypeUIC = uicontrol(inputFig,...
+        'Style','popupmenu',...
+        'Units','normalized',...
+        'Position',[0.01, 0.45, 0.7, 0.05],...
+        'String',{'--Select BSS method--','None','CCA','ICA'});
+    doRawPlotUIC = uicontrol(inputFig,...
+        'Style','checkbox',...
+        'Units','normalized',...
+        'Position',[0.01, 0.35, 0.45, 0.05],...
+        'String','Display raw plots');
+    doSpectroPlotUIC = uicontrol(inputFig,...
+        'Style','checkbox',...
+        'Units','normalized',...
+        'Position',[0.5, 0.35, 0.51, 0.05],...
+        'String','Display spectrograms');
+    
+    uicontrol(inputFig,...
+        'Style','pushbutton',...
+        'Units','normalized',...
+        'Position',[0.3, 0.1, 0.2, 0.05],...
+        'String','Run',...
+        'Callback','uiresume');
+    uiwait
+    
+    inputStruct.doPeriodFilt = logical(doPerioUIC.Value);
+    inputStruct.decompType = decompTypeUIC.String{decompTypeUIC.Value};
+    inputStruct.freqLow = str2double(freqLowUICedit.String);
+    inputStruct.flagType = flagTypeUIC.String{flagTypeUIC.Value};
+    inputStruct.bssType = bssTypeUIC.String{bssTypeUIC.Value};
+    inputStruct.slideWinSize = str2double(slideWinSizeUICedit.String);
+    inputStruct.iecThr = str2double(iecThrUICedit.String);
+    inputStruct.autoCorrThr = str2double(autoCorrThrUICedit.String);
+    inputStruct.autoCorrLagNum = str2double(autoCorrLagNumUICedit.String);
+    inputStruct.doRawPlot = logical(doRawPlotUIC.Value);
+    inputStruct.doSpectroPlot = logical(doSpectroPlotUIC.Value);
+    
+    close(inputFig)
 end
