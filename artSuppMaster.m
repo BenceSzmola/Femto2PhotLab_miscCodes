@@ -77,6 +77,13 @@ end
 numSamples = size(data,2);
 numChans = size(data,1);
 
+%% check if slideWinSize is 0 meaning full length should be used
+if slideWinSize == 0
+    slideWinSize = numSamples;
+elseif slideWinSize > numSamples
+    slideWinSize = numSamples;
+end
+
 %% run periodic filter if requested
 if doPeriodFilt
     data = periodicNoise(data,fs);
