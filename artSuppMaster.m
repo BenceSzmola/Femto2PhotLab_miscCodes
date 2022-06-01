@@ -14,9 +14,13 @@ if nargin == 3
     initStruct.fs = varargin{3};
     
     inputStruct = artSuppMaster_inputGUI(initStruct);
-    output = artSuppMaster(inputStruct);
-    algSettings = rmfield(inputStruct,{'data','tAxis','fs','data_perio'});
-    varargout = {output, algSettings};
+    if ~isempty(inputStruct)
+        output = artSuppMaster(inputStruct);
+        algSettings = rmfield(inputStruct,{'data','tAxis','fs','data_perio'});
+        varargout = {output, algSettings};
+    else
+        varargout = {[],[]};
+    end
     return
 elseif (nargin == 1) && ~isstruct(varargin{1})
     % initialize input struct
@@ -705,6 +709,16 @@ function inputStruct = artSuppMaster_inputGUI(inputStruct)
         'String','Run',...
         'Callback','uiresume');
     uiwait
+    
+    if ~ishandle(inputFig)
+        inputStruct = [];
+        wd = warndlg('Execution stopped by user');
+        pause(2)
+        if ishandle(wd)
+            close(wd)
+        end
+        return
+    end
     
     inputStruct.doPeriodFilt = logical(doPerioUIC.Value);
     inputStruct.decompType = decompTypeUIC.String{decompTypeUIC.Value};
