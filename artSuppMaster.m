@@ -17,6 +17,9 @@ if nargin == 3
     if ~isempty(inputStruct)
         output = artSuppMaster(inputStruct);
         algSettings = rmfield(inputStruct,{'data','tAxis','fs','data_perio','doRawPlot','doRawDogPlot','doSpectroPlot'});
+        if inputStruct.useFullLength
+            algSettings = rmfield(algSettings,{'slideWinSize'});
+        end
         varargout = {output, algSettings};
     else
         varargout = {[],[]};
