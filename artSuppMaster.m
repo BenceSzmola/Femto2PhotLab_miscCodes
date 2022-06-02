@@ -16,7 +16,7 @@ if nargin == 3
     inputStruct = artSuppMaster_inputGUI(initStruct);
     if ~isempty(inputStruct)
         output = artSuppMaster(inputStruct);
-        algSettings = rmfield(inputStruct,{'data','tAxis','fs','data_perio'});
+        algSettings = rmfield(inputStruct,{'data','tAxis','fs','data_perio','doRawPlot','doRawDogPlot','doSpectroPlot'});
         varargout = {output, algSettings};
     else
         varargout = {[],[]};
@@ -34,10 +34,13 @@ elseif (nargin == 1) && ~isstruct(varargin{1})
     output.flagType = 'IEC';
     output.bssType = '';
     output.slideWinSize = 2000;
+    output.useFullLength = false;
+    output.fullThenSlide = false;   % first run methods on full lenght, then on this precleaned data use the sliding approach
     output.iecThr = 0.8;
     output.autoCorrThr = 0.99;
     output.autoCorrLagNum = 10;
     output.doRawPlot = false;
+    output.doRawDogPlot = false;
     output.doSpectroPlot = false;
     varargout = {output};
     return
@@ -54,10 +57,13 @@ elseif (nargin == 1) && (isstruct(varargin{1}))
     flagType = inputStruct.flagType;
     bssType = inputStruct.bssType;
     slideWinSize = inputStruct.slideWinSize;
+    useFullLength = inputStruct.useFullLength;
+    fullThenSlide = inputStruct.fullThenSlide;
     iecThr = inputStruct.iecThr;
     autoCorrThr = inputStruct.autoCorrThr;
     autoCorrLagNum = inputStruct.autoCorrLagNum;
     doRawPlot = inputStruct.doRawPlot;
+    doRawDogPlot = inputStruct.doRawDogPlot;
     doSpectroPlot = inputStruct.doSpectroPlot;
 end
 
@@ -77,8 +83,8 @@ end
 numSamples = size(data,2);
 numChans = size(data,1);
 
-%% check if slideWinSize is 0 meaning full length should be used
-if slideWinSize == 0
+%% check whether user requested sliding window
+if useFullLength || fullThenSlide
     slideWinSize = numSamples;
 elseif slideWinSize > numSamples
     slideWinSize = numSamples;
@@ -208,6 +214,9 @@ switch bssType
                         % use the min expression to prevent problems stemming from the padded data in SWT
                         segInds = segments(segNum,1):min(length(tAxis),segments(segNum,2));
                         currCompSegs = currComps(:,segInds);
+                        if isempty(currCompSegs)
+                            continue
+                        end
                         
                         % apply either CCA or ICA
                         if strcmp(bssType,'CCA')
@@ -219,8 +228,9 @@ switch bssType
                                 break
                             end
                         end
-                        
-                        currCompsCl(:,segInds) = reconstr;
+                        if ~isempty(reconstr)
+                            currCompsCl(:,segInds) = reconstr;
+                        end
                     end
                     
                     for chan = 1:numChans
@@ -242,6 +252,9 @@ switch bssType
                     for segNum = 1:size(segments,1)
                         segInds = segments(segNum,1):segments(segNum,2);
                         currCompSegs = currComps(:,segInds);
+                        if isempty(currCompSegs)
+                            continue
+                        end
                         
                         if strcmp(bssType,'CCA')
                             reconstr = doCCAdiscard(currCompSegs,autoCorrThr,autoCorrLagNum);
@@ -336,11 +349,26 @@ switch decompType
         
 end
 
+if fullThenSlide
+    inputStructReRun = inputStruct;
+    inputStructReRun.doPeriodFilt = false;
+    inputStructReRun.fullThenSlide = false;
+    inputStructReRun.useFullLength = false;
+    inputStructReRun.data = dataCleaned;
+    inputStructReRun.doRawPlot = false;
+    inputStructReRun.doRawDogPlot = false;
+    inputStructReRun.doSpectroPlot = false;
+    dataCleaned = artSuppMaster(inputStructReRun);
+end
+
 if doRawPlot
-    plotBefAft(tAxis,fs,data,dataCleaned,false,decompType,flagType,bssType)
+    plotBefAft(tAxis,fs,data,dataCleaned,'RawComp',decompType,flagType,bssType)
+end
+if doRawDogPlot
+    plotBefAft(tAxis,fs,data,dataCleaned,'RawDogComp',decompType,flagType,bssType)
 end
 if doSpectroPlot
-    plotBefAft(tAxis,fs,data,dataCleaned,true,decompType,flagType,bssType)
+    plotBefAft(tAxis,fs,data,dataCleaned,'SpectroComp',decompType,flagType,bssType)
 end
 
 varargout{1} = dataCleaned;
@@ -456,7 +484,14 @@ end
 %%
 function [reconstr,skip] = doICAdiscard(inputMat,decompType,compNum,segNum,numSegs,segtAxis,fig,spH,dbH)
 % computing ICA and then asking the user to choose which ICs they want to discard
+    assignin('base','ICAinputMat',inputMat)
+    assignin('base','segTaxis',segtAxis)
     [ICs,A,~] = fastica(inputMat);
+    if isempty(ICs)
+        reconstr = [];
+        skip = [];
+        return
+    end
     
     % calling the function which fills in the plots into the discarding figure
     plot2discardICfig(spH,dbH,inputMat,ICs,decompType,compNum,segNum,numSegs,segtAxis)
@@ -565,57 +600,96 @@ function plot2discardICfig(spH,dbH,inputMat,ICs,decompType,compNum,segNum,numSeg
 end
 
 %%
-function plotBefAft(tAxis,fs,data,dataCl,spectro,decompType,flagType,bssType)
+function plotBefAft(tAxis,fs,data,dataCl,dispMode,decompType,flagType,bssType)
     if strcmp(bssType,'')
         bssType = 'No BSS';
     end
     for chan = 1:size(data,1)
-        if ~spectro
-            figure('Name',sprintf('Channel #%d - Before and after cleaning',chan),'WindowState','maximized');
-            subplot(211)
-            plot(tAxis,data(chan,:))
-            title(sprintf('Ch#%d - Raw',chan))
-            xlabel('Time [s]')
-            ylabel('Voltage [\muV]')
-            xlim([min(tAxis), max(tAxis)])
-            
-            subplot(212)
-            plot(tAxis,dataCl(chan,:))
-            title(sprintf('Ch#%d - %s, %s, %s',chan,decompType,flagType,bssType))
-            xlabel('Time [s]')
-            ylabel('Voltage [\muV]')
-            xlim([min(tAxis), max(tAxis)])
-        else
-            figure('Name',sprintf('Channel #%d CWT - Before and after cleaning',chan),...
-                'WindowState','maximized',...
-                'SizeChangedFcn',@updateSpectroLabels);
-            [cfs,f] = cwt(data(chan,:),'amor',fs,'FrequencyLimits',[1,1000]);
-            sp1 = subplot(211);
-            imagesc(tAxis,log2(f),abs(cfs))
-            axis tight
-            sp1.YDir = 'normal';
-            sp1.YTickLabel = num2str(2.^(sp1.YTick'));
-            title(sprintf('Ch#%d CWT - Raw',chan))
-            xlabel('Time [s]')
-            ylabel('Frequency [Hz]')
-            c = colorbar;
-            c.Label.String = 'CWT coeff. magnitude';
-            clear cfs f sp1
-            
-            [cfs,f] = cwt(dataCl(chan,:),'amor',fs,'FrequencyLimits',[1,1000]);
-            sp2 = subplot(212);
-            imagesc(tAxis,log2(f),abs(cfs))
-            axis tight
-            sp2.YDir = 'normal';
-            sp2.YTickLabel = cellfun(@(x) num2str(x),mat2cell(2.^(sp2.YTick'),ones(1,length(sp2.YTick))),'UniformOutput',false);
-            title(sprintf('Ch#%d CWT - %s, %s, %s',chan,decompType,flagType,bssType))
-            xlabel('Time [s]')
-            ylabel('Frequency [Hz]')
-            c = colorbar;
-            c.Label.String = 'CWT coeff. magnitude';
-            clear cfs f sp2
+        switch dispMode
+            case 'RawComp'
+                figure('Name',sprintf('Channel #%d - Before and after cleaning',chan),...
+                    'WindowState','maximized');
+                subplot(211)
+                plot(tAxis,data(chan,:))
+                title(sprintf('Ch#%d - Raw',chan))
+                xlabel('Time [s]')
+                ylabel('Voltage [\muV]')
+                xlim([min(tAxis), max(tAxis)])
+
+                subplot(212)
+                plot(tAxis,dataCl(chan,:))
+                title(sprintf('Ch#%d - %s, %s, %s',chan,decompType,flagType,bssType))
+                xlabel('Time [s]')
+                ylabel('Voltage [\muV]')
+                xlim([min(tAxis), max(tAxis)])
+                
+            case 'RawDogComp'
+                rawDog = DoG(data(chan,:),fs,150,250);
+                cleanDog = DoG(dataCl(chan,:),fs,150,250);
+                
+                figure('Name',sprintf('Channel #%d - Before and after cleaning',chan),...
+                    'WindowState','maximized');
+                subplot(221)
+                plot(tAxis,data(chan,:))
+                title(sprintf('Ch#%d - Raw',chan))
+                xlabel('Time [s]')
+                ylabel('Voltage [\muV]')
+                
+                subplot(223)
+                plot(tAxis,rawDog)
+                title(sprintf('Ch#%d - DoG',chan))
+                xlabel('Time [s]')
+                ylabel('Voltage [\muV]')
+                
+                subplot(222)
+                plot(tAxis,dataCl(chan,:))
+                title(sprintf('Ch#%d - Cleaned',chan))
+                xlabel('Time [s]')
+                ylabel('Voltage [\muV]')
+                
+                subplot(224)
+                plot(tAxis,cleanDog)
+                title(sprintf('Ch#%d - Cleaned+DoG',chan))
+                xlabel('Time [s]')
+                ylabel('Voltage [\muV]')
+            case 'SpectroComp'
+                figure('Name',sprintf('Channel #%d CWT - Before and after cleaning',chan),...
+                    'WindowState','maximized',...
+                    'SizeChangedFcn',@updateSpectroLabels);
+                [cfs,f] = cwt(data(chan,:),'amor',fs,'FrequencyLimits',[1,1000]);
+                sp1 = subplot(211);
+                imagesc(tAxis,log2(f),abs(cfs))
+                axis tight
+                sp1.YDir = 'normal';
+                sp1.YTickLabel = num2str(2.^(sp1.YTick'));
+                title(sprintf('Ch#%d CWT - Raw',chan))
+                xlabel('Time [s]')
+                ylabel('Frequency [Hz]')
+                c = colorbar;
+                c.Label.String = 'CWT coeff. magnitude';
+                clear cfs f sp1
+
+                [cfs,f] = cwt(dataCl(chan,:),'amor',fs,'FrequencyLimits',[1,1000]);
+                sp2 = subplot(212);
+                imagesc(tAxis,log2(f),abs(cfs))
+                axis tight
+                sp2.YDir = 'normal';
+                sp2.YTickLabel = cellfun(@(x) num2str(x),mat2cell(2.^(sp2.YTick'),ones(1,length(sp2.YTick))),'UniformOutput',false);
+                title(sprintf('Ch#%d CWT - %s, %s, %s',chan,decompType,flagType,bssType))
+                xlabel('Time [s]')
+                ylabel('Frequency [Hz]')
+                c = colorbar;
+                c.Label.String = 'CWT coeff. magnitude';
+                clear cfs f sp2                
         end
-        linkaxes(findobj(gcf,'Type','axes'),'xy')
+        if strcmp(dispMode,'RawDogComp')
+            ax = flipud(findobj(gcf,'Type','axes'));
+            linkaxes(ax([1,3]),'y')
+            linkaxes(ax([2,4]),'y')
+            linkaxes(ax,'x')
+        else
+            linkaxes(findobj(gcf,'Type','axes'),'xy')
+        end
     end
     
     function updateSpectroLabels(h,~)
@@ -668,50 +742,67 @@ function inputStruct = artSuppMaster_inputGUI(inputStruct)
         'Units','normalized',...
         'Position',[0.4, 0.65, 0.09, 0.05],...
         'String','0.8');
+    fullThenSlideUIC = uicontrol(inputFig,...
+        'Style','checkbox',...
+        'Units','normalized',...
+        'Position',[0.01, 0.55, 0.2, 0.05],...
+        'String','Full then slide',...
+        'Callback',@slideChecksCB);
+    useFullLengthUIC = uicontrol(inputFig,...
+        'Style','checkbox',...
+        'Units','normalized',...
+        'Position',[0.22, 0.55, 0.2, 0.05],...
+        'String','Use full length',...
+        'Callback',@slideChecksCB);
     uicontrol(inputFig,...
         'Style','text',...
         'Units','normalized',...
-        'Position',[0.55, 0.65, 0.35, 0.05],...
+        'Position',[0.5, 0.55, 0.3, 0.05],...
         'String','Sliding Win Size [samples]');
     slideWinSizeUICedit = uicontrol(inputFig,...
         'Style','edit',...
         'Units','normalized',...
-        'Position',[0.9, 0.65, 0.09, 0.05],...
+        'Position',[0.85, 0.55, 0.1, 0.05],...
         'String','2000');
     uicontrol(inputFig,...
         'Style','text',...
         'Units','normalized',...
-        'Position',[0.01, 0.55, 0.35, 0.05],...
+        'Position',[0.01, 0.45, 0.35, 0.05],...
         'String','Autocorr threshold');
     autoCorrThrUICedit = uicontrol(inputFig,...
         'Style','edit',...
         'Units','normalized',...
-        'Position',[0.4, 0.55, 0.09, 0.05],...
+        'Position',[0.4, 0.45, 0.09, 0.05],...
         'String','0.99');
     uicontrol(inputFig,...
         'Style','text',...
         'Units','normalized',...
-        'Position',[0.55, 0.55, 0.35, 0.05],...
-        'String','Autocorr threshold');
+        'Position',[0.55, 0.45, 0.35, 0.05],...
+        'String','Autocorr lagnum');
     autoCorrLagNumUICedit = uicontrol(inputFig,...
         'Style','edit',...
         'Units','normalized',...
-        'Position',[0.9, 0.55, 0.09, 0.05],...
+        'Position',[0.9, 0.45, 0.09, 0.05],...
         'String','10');
     bssTypeUIC = uicontrol(inputFig,...
         'Style','popupmenu',...
         'Units','normalized',...
-        'Position',[0.01, 0.45, 0.7, 0.05],...
+        'Position',[0.01, 0.35, 0.7, 0.05],...
         'String',{'--Select BSS method--','None','CCA','ICA'});
     doRawPlotUIC = uicontrol(inputFig,...
         'Style','checkbox',...
         'Units','normalized',...
-        'Position',[0.01, 0.35, 0.45, 0.05],...
+        'Position',[0.01, 0.25, 0.3, 0.05],...
         'String','Display raw plots');
+    doRawDogPlotUIC = uicontrol(inputFig,...
+        'Style','checkbox',...
+        'Units','normalized',...
+        'Position',[0.33, 0.25, 0.3, 0.05],...
+        'String','Display raw&DoG plots');
     doSpectroPlotUIC = uicontrol(inputFig,...
         'Style','checkbox',...
         'Units','normalized',...
-        'Position',[0.5, 0.35, 0.51, 0.05],...
+        'Position',[0.66, 0.25, 0.3, 0.05],...
         'String','Display spectrograms');
     
     uicontrol(inputFig,...
@@ -738,11 +829,37 @@ function inputStruct = artSuppMaster_inputGUI(inputStruct)
     inputStruct.flagType = flagTypeUIC.String{flagTypeUIC.Value};
     inputStruct.bssType = bssTypeUIC.String{bssTypeUIC.Value};
     inputStruct.slideWinSize = str2double(slideWinSizeUICedit.String);
+    inputStruct.useFullLength = logical(useFullLengthUIC.Value);
+    inputStruct.fullThenSlide = logical(fullThenSlideUIC.Value);
     inputStruct.iecThr = str2double(iecThrUICedit.String);
     inputStruct.autoCorrThr = str2double(autoCorrThrUICedit.String);
     inputStruct.autoCorrLagNum = str2double(autoCorrLagNumUICedit.String);
     inputStruct.doRawPlot = logical(doRawPlotUIC.Value);
+    inputStruct.doRawDogPlot = logical(doRawDogPlotUIC.Value);
     inputStruct.doSpectroPlot = logical(doSpectroPlotUIC.Value);
     
     close(inputFig)
+    
+    function slideChecksCB(h,~)
+        switch h
+            case fullThenSlideUIC
+                if h.Value
+                    useFullLengthUIC.Value = 0;
+                    useFullLengthUIC.Enable = 'off';
+                else
+                    useFullLengthUIC.Value = 0;
+                    useFullLengthUIC.Enable = 'on';
+                end
+            case useFullLengthUIC
+                if h.Value
+                    fullThenSlideUIC.Value = 0;
+                    fullThenSlideUIC.Enable = 'off';
+                    slideWinSizeUICedit.Enable = 'off';
+                else
+                    fullThenSlideUIC.Value = 0;
+                    fullThenSlideUIC.Enable = 'on';
+                    slideWinSizeUICedit.Enable = 'on';
+                end                
+        end
+    end
 end
