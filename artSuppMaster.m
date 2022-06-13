@@ -687,9 +687,18 @@ function plotBefAft(tAxis,fs,data,dataCl,dispMode,decompType,flagType,bssType)
         end
         if strcmp(dispMode,'RawDogComp')
             ax = flipud(findobj(gcf,'Type','axes'));
-            linkaxes(ax([1,3]),'y')
-            linkaxes(ax([2,4]),'y')
-            linkaxes(ax,'x')
+%             linkaxes(ax([1,3]),'y')
+%             linkaxes(ax([2,4]),'y')
+%             linkaxes(ax,'x')
+            for i = [1,3]
+                setappdata(ax(i), 'YLim_listeners', linkprop(ax([1,3]),'YLim'));
+                setappdata(ax(i), 'XLim_listeners', linkprop(ax(:),'XLim'));
+            end
+            for i = [2,4]
+                setappdata(ax(i), 'YLim_listeners', linkprop(ax([2,4]),'YLim'));
+                setappdata(ax(i), 'XLim_listeners', linkprop(ax(:),'XLim'));
+            end
+            
         else
             linkaxes(findobj(gcf,'Type','axes'),'xy')
         end
