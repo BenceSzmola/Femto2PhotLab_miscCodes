@@ -646,13 +646,13 @@ function plotBefAft(tAxis,fs,data,dataCl,dispMode,decompType,flagType,bssType)
                 
                 subplot(222)
                 plot(tAxis,dataCl(chan,:))
-                title(sprintf('Ch#%d - Cleaned',chan))
+                title(sprintf('Ch#%d Cleaned - %s, %s, %s',chan,decompType,flagType,bssType))
                 xlabel('Time [s]')
                 ylabel('Voltage [\muV]')
                 
                 subplot(224)
                 plot(tAxis,cleanDog)
-                title(sprintf('Ch#%d - Cleaned+DoG',chan))
+                title(sprintf('Ch#%d Cleaned+DoG - %s, %s, %s',chan,decompType,flagType,bssType))
                 xlabel('Time [s]')
                 ylabel('Voltage [\muV]')
             case 'SpectroComp'
